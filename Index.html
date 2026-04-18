@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Screen Eye</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f4f4f9; display: flex; justify-content: center; padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 500px; }
+        h2 { margin-top: 0; color: #333; }
+        input, textarea { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; }
+        #output { background: #f9f9f9; padding: 15px; border-radius: 6px; border-left: 4px solid #007bff; min-height: 50px; white-space: pre-wrap; margin-top: 15px; font-size: 14px; }
+        canvas { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>AI Screen Assistant</h2>
+    <input type="password" id="apiKey" placeholder="Enter Gemini API Key">
+    <textarea id="query" placeholder="What should I look for? (e.g. Summarize this page)"></textarea>
+    <button id="btn">Analyze My Screen</button>
+    <div id="output">Results will appear here...</div>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script type="module">
+    // We import the Google AI SDK directly from a CDN
+    import { GoogleGenerativeAI } from "https://esm.run/@google/generative-ai";
+
+    const btn = document.getElementById('btn');
+    const output = document.getElementById('output');
+    const canvas = document.getElementById('canvas');
+
+    btn.onclick = async () => {
+        const key = document.getElementById('apiKey').value;
+        const query = document.getElementById('query').value;
+
+        if (!key) return alert("Please enter an API Key");
+
+        try {
+            btn.disabled = true;
+            output.innerText = "Requesting screen access...";
+
+            // 1. CAPTURE: Ask user for screen/window
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            await video.play();
+
+            // Draw frame to canvas
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            
+            // Stop stream immediately after capture
+            stream.getTracks().forEach(track => track.stop());
+
+            // Convert canvas to Base64
+            const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
+
+            // 2. THINK: Send to Gemini
+            output.innerText = "AI is analyzing...";
+            const genAI = new GoogleGenerativeAI(key);
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+            const result = await model.generateContent([
+                query || "Analyze this screen for productivity tasks.",
+                { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
+            ]);
+
+            output.innerText = result.response.text();
+
+        } catch (err) {
+            output.innerText = "Error: " + err.message;
+        } finally {
+            btn.disabled = false;
+        }
+    };
+</script>
+
+</body>
+</html>
