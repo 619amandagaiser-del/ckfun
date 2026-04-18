@@ -2,93 +2,123 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Local AI Eye (No API Key)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Productivity Eye</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: white; display: flex; justify-content: center; padding: 20px; }
-        .container { background: #1e1e1e; padding: 25px; border-radius: 15px; width: 500px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        #status { font-size: 12px; color: #888; margin-bottom: 10px; }
-        textarea { width: 100%; background: #2d2d2d; color: white; border: 1px solid #444; padding: 10px; border-radius: 8px; margin-bottom: 10px; }
-        button { width: 100%; padding: 15px; background: #6200ee; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-        button:disabled { background: #444; cursor: wait; }
-        #output { margin-top: 20px; padding: 15px; background: #2d2d2d; border-radius: 8px; min-height: 100px; line-height: 1.5; border-left: 4px solid #6200ee; }
-        canvas { display: none; }
+        :root { --bg: #121212; --card: #1e1e1e; --accent: #f5820d; --text: #e0e0e0; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 20px; margin: 0; }
+        .app-container { background: var(--card); width: 100%; max-width: 550px; padding: 25px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #333; }
+        h2 { color: var(--accent); margin-top: 0; display: flex; align-items: center; gap: 10px; }
+        .input-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-size: 13px; color: #888; }
+        input, textarea { width: 100%; padding: 12px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; color: white; box-sizing: border-box; font-size: 14px; }
+        textarea { height: 80px; resize: none; }
+        button { width: 100%; padding: 14px; background: var(--accent); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
+        button:hover { opacity: 0.9; }
+        button:disabled { background: #444; cursor: not-allowed; }
+        #output { margin-top: 20px; padding: 15px; background: #111; border-radius: 8px; font-size: 14px; line-height: 1.6; border-left: 4px solid var(--accent); white-space: pre-wrap; }
+        .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; background: #555; }
+        .online { background: #4CAF50; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <h2>Local Screen AI</h2>
-    <div id="status">Loading AI Engine...</div>
+<div class="app-container">
+    <h2>👁️ AI Productivity Eye</h2>
     
-    <textarea id="prompt" rows="3">Describe what is on my screen in detail.</textarea>
-    <button id="btn" disabled>Wait for Engine...</button>
+    <div class="input-group">
+        <label>Gemini API Key (Required for Brain)</label>
+        <input type="password" id="geminiKey" placeholder="Enter your Gemini API Key...">
+    </div>
+
+    <div class="input-group">
+        <label>Productivity Prompt</label>
+        <textarea id="userPrompt">Analyze this screen and tell me what my next logical step should be based on my current work.</textarea>
+    </div>
+
+    <button id="mainBtn">Analyze Screen & Log to Firebase</button>
+
+    <div id="output">System ready. Capture a screen to begin.</div>
     
-    <div id="output">The AI response will appear here after analysis.</div>
+    <p style="font-size: 11px; color: #555; text-align: center; margin-top: 20px;">
+        Database Status: <span id="dbStatus" class="status-dot"></span> Firebase Connected
+    </p>
 </div>
 
-<canvas id="canvas"></canvas>
-
 <script type="module">
-    // Import Transformers.js for local browser-based AI
-    import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0';
+    // Load SDKs via CDN
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { GoogleGenerativeAI } from "https://esm.run/@google/generative-ai";
 
-    const status = document.getElementById('status');
-    const btn = document.getElementById('btn');
+    // 1. YOUR FIREBASE CONFIG
+    const firebaseConfig = {
+        apiKey: "AIzaSyCIhojT1nuNGvu4i1b5qPgtu9T00uUaxRo",
+        authDomain: "coll-45ab0.firebaseapp.com",
+        projectId: "coll-45ab0",
+        storageBucket: "coll-45ab0.firebasestorage.app",
+        messagingSenderId: "778366611173",
+        appId: "1:778366611173:web:a864098c36722a94f0ee0c"
+    };
+
+    // Initialize Firebase & Firestore
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    document.getElementById('dbStatus').classList.add('online');
+
+    const mainBtn = document.getElementById('mainBtn');
     const output = document.getElementById('output');
-    const canvas = document.getElementById('canvas');
 
-    let vlm_pipeline;
+    mainBtn.onclick = async () => {
+        const geminiKey = document.getElementById('geminiKey').value;
+        const prompt = document.getElementById('userPrompt').value;
 
-    // 1. Load the model locally using WebGPU
-    async function init() {
+        if (!geminiKey) return alert("Please enter your Gemini API Key first!");
+
         try {
-            status.innerText = "Downloading AI (approx 600MB)... please wait.";
-            vlm_pipeline = await pipeline('image-to-text', 'Xenova/moondream2', {
-                device: 'webgpu', // Uses your GPU for speed
-            });
-            status.innerText = "AI Engine Ready (Local)";
-            btn.disabled = false;
-            btn.innerText = "Analyze My Screen";
-        } catch (e) {
-            status.innerText = "WebGPU not supported. Trying CPU (Slower)...";
-            vlm_pipeline = await pipeline('image-to-text', 'Xenova/moondream2');
-            status.innerText = "AI Engine Ready (Local CPU)";
-            btn.disabled = false;
-        }
-    }
+            mainBtn.disabled = true;
+            output.innerText = "📸 Requesting screen access...";
 
-    btn.onclick = async () => {
-        try {
-            btn.disabled = true;
-            output.innerText = "Select a screen/window to capture...";
-
-            // 2. Capture Screen
+            // 2. CAPTURE SCREEN
             const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
             const video = document.createElement('video');
             video.srcObject = stream;
             await video.play();
 
+            const canvas = document.createElement('canvas');
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             canvas.getContext('2d').drawImage(video, 0, 0);
             
-            // Stop screen sharing immediately
+            // Stop sharing
             stream.getTracks().forEach(track => track.stop());
-            const dataURL = canvas.toDataURL('image/png');
+            const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
 
-            // 3. Run AI Locally
-            output.innerText = "AI is thinking locally on your GPU...";
-            const result = await vlm_pipeline(dataURL, document.getElementById('prompt').value);
-            
-            output.innerText = result[0].generated_text;
+            // 3. AI ANALYSIS (GEMINI)
+            output.innerText = "🧠 AI is processing your screen...";
+            const genAI = new GoogleGenerativeAI(geminiKey);
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+            const result = await model.generateContent([
+                prompt,
+                { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
+            ]);
+            const responseText = await result.response.text();
+            output.innerText = responseText;
+
+            // 4. LOG TO FIREBASE
+            await addDoc(collection(db, "productivity_history"), {
+                query: prompt,
+                response: responseText,
+                created_at: serverTimestamp()
+            });
+
         } catch (err) {
-            output.innerText = "Error: " + err.message;
+            output.innerText = "❌ Error: " + err.message;
         } finally {
-            btn.disabled = false;
+            mainBtn.disabled = false;
         }
     };
-
-    init();
 </script>
 
 </body>
